@@ -5,7 +5,6 @@ import asyncio
 
 api = Blueprint('api', __name__)
 
-# Shared trade state
 trade_state = {'running': False}
 trade_task = None
 
@@ -26,7 +25,6 @@ def start_trade():
         """Run trade logic in a separate thread."""
         trade_state['running'] = True
         try:
-            # Create and run a new asyncio event loop
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_until_complete(trade_with_timeout(trade_state))
@@ -35,7 +33,6 @@ def start_trade():
         finally:
             trade_state['running'] = False
 
-    # Start the trade in a separate thread
     trade_task = Thread(target=run_trade)
     trade_task.start()
 
@@ -49,7 +46,6 @@ def stop_trade():
     if not trade_state['running']:
         return jsonify({'status': 'error', 'message': 'No trade running'}), 400
 
-    # Stop the trade
     trade_state['running'] = False
     return jsonify({'status': 'success', 'message': 'Trade stopped'})
 
