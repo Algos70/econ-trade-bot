@@ -3,8 +3,8 @@ from binance import AsyncClient, BinanceSocketManager
 
 g_symbol = 'BTCUSDT'
 g_cycle = 1
-g_longterm = 40
-g_shortterm = 20
+g_longterm = 80
+g_shortterm = 45
 
 class SmaCrossOver:
     def __init__(self, trade_state):
@@ -54,17 +54,53 @@ class SmaCrossOver:
                 longterm_sma = sum(price_list) / g_longterm
                 shortterm_sma = sum(price_list[:g_shortterm]) / g_shortterm
 
-                if state == 0 and shortterm_sma > longterm_sma:
-                    print(f"BUY: {curr_price} | Short SMA: {shortterm_sma} > Long SMA: {longterm_sma}")
+                rsi = await self.calculate_rsi(price_list)
+                print("rsi: ", rsi)
+                print("shortterm_sma: ", shortterm_sma)
+                print("longterm_sma: ", longterm_sma)
+                if state == 0 and shortterm_sma > longterm_sma and rsi < 30:
+                    # Buy signal: SMA crossover and RSI indicates oversold condition
+                    print(f"BUY: {curr_price} | Short SMA: {shortterm_sma} > Long SMA: {longterm_sma} | RSI: {rsi}")
                     buy_price = curr_price
                     state = 1
-                elif state == 1 and shortterm_sma < longterm_sma:
-                    print(f"SELL: {curr_price} | Profit: {curr_price - buy_price} USDT")
+                elif state == 1 and (shortterm_sma < longterm_sma or rsi > 70):
+                    # Sell signal: SMA crossover or RSI indicates overbought condition
+                    print(f"SELL: {curr_price} | Profit: {curr_price - buy_price} USDT | RSI: {rsi}")
                     state = 0
-            else:
-                cnt += 1
-
+            cnt+=1
             await asyncio.sleep(g_cycle)
+    
+
+    async def calculate_rsi(self, price_list, period=14):
+        """Calculate the RSI for a given price list."""
+        gain_list = []
+        loss_list = []
+
+        # Calculate the price differences
+        for i in range(1, len(price_list)):
+            price_diff = price_list[i] - price_list[i-1]
+            if price_diff > 0:
+                gain_list.append(price_diff)
+                loss_list.append(0)
+            else:
+                gain_list.append(0)
+                loss_list.append(abs(price_diff))
+
+        # If there are not enough prices to calculate RSI, return None
+        if len(gain_list) < period:
+            return None
+
+        # Compute the average gain and average loss over the period
+        avg_gain = sum(gain_list[-period:]) / period
+        avg_loss = sum(loss_list[-period:]) / period
+
+        # Avoid division by zero
+        if avg_loss == 0:
+            return 100
+
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
 
 async def trade_with_timeout(trade_state):
     """Handles trading logic with SmaCrossOver and a 5-minute timeout."""
