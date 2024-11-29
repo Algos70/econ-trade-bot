@@ -76,7 +76,6 @@ class SmaCrossOver:
             # Concatenate the new row to the existing price_df
             price_df = pd.concat([price_df, kline_df], ignore_index=True)
             price_df = price_df.tail(g_longterm)
-            print(price_df["close"])
 
             # After accumulating enough data, perform SMA and RSI calculations
             if len(price_df) >= g_longterm:  # Perform analysis once enough data is available
@@ -86,7 +85,8 @@ class SmaCrossOver:
 
                 # Calculate RSI using pandas_ta
                 rsi = await self.calculate_rsi_with_pandas_ta(price_df["close"], 14)
-
+                if pd.isna(rsi):
+                    rsi = 0
                 print(f"RSI: {rsi} | Short-term SMA: {shortterm_sma} | Long-term SMA: {longterm_sma}")
 
                 if state == 0 and shortterm_sma > longterm_sma and rsi < 30:
@@ -95,7 +95,7 @@ class SmaCrossOver:
                     buy_price = kline_dict['close']
                     state = 1  # Change state to "holding" position
 
-                elif state == 1 and (shortterm_sma < longterm_sma or rsi > 70):
+                elif state == 1 and (shortterm_sma < longterm_sma or rsi > 70) and kline_dict['close'] - buy_price != 0:
                     # Sell signal: SMA crossover or RSI indicates overbought condition
                     print(f"SELL: {kline_dict['close']} | Profit: {kline_dict['close'] - buy_price} USDT | RSI: {rsi}")
                     state = 0  # Change state to "not holding" position
