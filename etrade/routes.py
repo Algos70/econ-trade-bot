@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request
 from threading import Thread
 from .services import trade_with_timeout
 import asyncio
-
+from etrade.extensions import socketio
 api = Blueprint('api', __name__)
 
 trade_state = {'running': False}
@@ -33,7 +33,7 @@ def start_trade():
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(trade_with_timeout(trade_state, trade_parameters))
+            loop.run_until_complete(trade_with_timeout(trade_state, trade_parameters, socketio))
         except Exception as e:
             print(f"Error during trading: {e}")
         finally:
