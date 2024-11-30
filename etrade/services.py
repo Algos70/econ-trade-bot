@@ -79,8 +79,13 @@ class SmaCrossOver:
             # After accumulating enough data, perform SMA and RSI calculations
             if len(price_df) >= g_longterm:  # Perform analysis once enough data is available
                 # Calculate long-term and short-term SMAs (use the closing prices)
-                longterm_sma = price_df["close"].tail(g_longterm).mean()
-                shortterm_sma = price_df["close"].tail(g_shortterm).mean()
+                price_df["longterm_sma"] = ta.sma(price_df["close"], length=round(g_longterm/2))
+                price_df["shortterm_sma"] = ta.sma(price_df["close"], length=round(g_shortterm/6))
+
+                # Extract the latest SMA values
+                longterm_sma = price_df["longterm_sma"].iloc[-1]
+                shortterm_sma = price_df["shortterm_sma"].iloc[-1]
+                print(f"Long SMA: {longterm_sma} | Short SMA: {shortterm_sma}")
 
                 # Calculate RSI using pandas_ta
                 rsi = await self.calculate_rsi_with_pandas_ta(price_df["close"], 14)
