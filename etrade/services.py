@@ -16,10 +16,11 @@ class SmaCrossOver:
         self._first_price_info_fut = None
         self.socketio = socketio
         self.symbol = symbol
-        self.balance = 10000.0  # Starting balance
-        self.holdings = 0  # Amount of crypto held
-        self.total_profit = 0  # Track total profit/loss
-        self.trades_made = 0  # Track number of trades
+        self.balance = 10000.0
+        self.holdings = 0
+        self.total_profit = 0
+        self.trades_made = 0
+        self.stop_loss_pct = 0.02 
 
     @classmethod
     async def create(cls, api_key, api_sec, trade_state, socketio, symbol):
@@ -51,6 +52,7 @@ class SmaCrossOver:
                                        "taker_buy_quote_asset_volume", "ignore"])
 
         buy_price = 0
+        stop_loss_price = 0
         state = 0
         
         await self._first_price_info_fut
@@ -122,7 +124,8 @@ class SmaCrossOver:
                         print(f"{self.symbol} BUY: ${current_price:.2f} | Amount: ${trade_amount:.2f} | Balance: ${self.balance:.2f}")
                         send_buy_signal(self.socketio, trade_info)
 
-                elif state == 1 and (shortterm_sma < longterm_sma or rsi > trade_parameters['rsi_overbought'] or price_df["close"].iloc[-1] > bb_upper) and current_price - buy_price != 0:
+                elif (state == 1 and (shortterm_sma < longterm_sma or rsi > trade_parameters['rsi_overbought'] or price_df["close"].iloc[-1] > bb_upper
+                                      or price_df["close"].iloc[-1] - buy_price > self.stop_loss_pct * buy_price)) and current_price - buy_price != 0:
                     current_price = float(kline_dict['close'])
                     sell_value = self.holdings * current_price
                     trade_profit = sell_value - (self.holdings * buy_price)
