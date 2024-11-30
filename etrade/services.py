@@ -16,10 +16,10 @@ class SmaCrossOver:
         self._first_price_info_fut = None
 
     @classmethod
-    async def create(cls, api_key, api_sec, testnet, trade_state):
+    async def create(cls, api_key, api_sec, trade_state):
         """Create and initialize the SmaCrossOver instance."""
         instance = cls(trade_state)
-        instance._client = await AsyncClient.create(api_key, api_sec, tld="com", testnet=testnet)
+        instance._client = await AsyncClient.create(api_key, api_sec, tld="com")
         loop = asyncio.get_running_loop()
         instance._first_price_info_fut = loop.create_future()
         return instance
@@ -40,7 +40,7 @@ class SmaCrossOver:
                 #print(self._price_info)
 
 
-    async def run(self):
+    async def run(self, trade_parameters):
         """Run the SMA crossover trading algorithm."""
         # Create an empty DataFrame to hold all kline data
         price_df = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "close_time", "quote_asset_volume", "number_of_trades", "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
@@ -53,6 +53,7 @@ class SmaCrossOver:
         while self.trade_state['running']:
             # Extract the relevant kline data from the WebSocket message
             kline_data = self._price_info['k']  # 'k' contains the kline data
+            print(kline_data['c'])
             # Create a dictionary with all kline data
             kline_dict = {
                 "timestamp": kline_data['t'],
@@ -79,8 +80,8 @@ class SmaCrossOver:
             # After accumulating enough data, perform SMA and RSI calculations
             if len(price_df) >= g_longterm:  # Perform analysis once enough data is available
                 # Calculate long-term and short-term SMAs (use the closing prices)
-                price_df["longterm_sma"] = ta.sma(price_df["close"], length=round(g_longterm/2))
-                price_df["shortterm_sma"] = ta.sma(price_df["close"], length=round(g_shortterm/6))
+                price_df["longterm_sma"] = ta.sma(price_df["close"], length=trade_parameters['longterm_sma'])
+                price_df["shortterm_sma"] = ta.sma(price_df["close"], length=trade_parameters['shortterm_sma'])
 
                 # Extract the latest SMA values
                 longterm_sma = price_df["longterm_sma"].iloc[-1]
@@ -88,23 +89,24 @@ class SmaCrossOver:
                 print(f"Long SMA: {longterm_sma} | Short SMA: {shortterm_sma}")
 
                 # Calculate RSI using pandas_ta
-                rsi = await self.calculate_rsi_with_pandas_ta(price_df["close"], 14)
+                rsi = await self.calculate_rsi_with_pandas_ta(price_df["close"], trade_parameters['rsi_period'])
                 if pd.isna(rsi):
                     rsi = 0
+                print(f"RSI: {rsi}")
 
-                bb = ta.bbands(price_df["close"], length=round(g_shortterm/2))
+                bb = ta.bbands(price_df["close"], length=trade_parameters['bb_lenght'])
                 bb.columns = ["lower_b", "middle_b", "upper_b", "b_p", "p_p"]
 
                 # Extract the renamed columns for use
                 bb_lower = bb["lower_b"].iloc[-1]
                 bb_upper = bb["upper_b"].iloc[-1]
                 
-                if state == 0 and shortterm_sma > longterm_sma and rsi < 30 and price_df["close"].iloc[-1] < bb_lower:
+                if state == 0 and shortterm_sma > longterm_sma and rsi < trade_parameters['rsi_oversold'] and price_df["close"].iloc[-1] < bb_lower:
                     # Buy signal: SMA crossover, RSI indicates oversold, and price below lower Bollinger Band
                     print(f"BUY: {kline_dict['close']} | Short SMA: {shortterm_sma} > Long SMA: {longterm_sma} | RSI: {rsi}")
                     buy_price = kline_dict['close']
                     state = 1  # Change state to "holding" position
-                elif state == 1 and (shortterm_sma < longterm_sma or rsi > 70 or price_df["close"].iloc[-1] > bb_upper) and kline_dict['close'] - buy_price != 0:
+                elif state == 1 and (shortterm_sma < longterm_sma or rsi > trade_parameters['rsi_overbought'] or price_df["close"].iloc[-1] > bb_upper) and kline_dict['close'] - buy_price != 0:
                     # Sell signal: SMA crossover, RSI indicates overbought, or price above upper Bollinger Band
                     print(f"SELL: {kline_dict['close']} | Profit: {kline_dict['close'] - buy_price} USDT | RSI: {rsi}")
                     state = 0  # Change state to "not holding" position
@@ -117,15 +119,14 @@ class SmaCrossOver:
         prices["rsi"] = ta.rsi(prices["close"], length=period)
         return prices["rsi"].iloc[-1]
 
-async def trade_with_timeout(trade_state):
+async def trade_with_timeout(trade_state, trade_parameters):
     """Handles trading logic with SmaCrossOver and a 5-minute timeout."""
     api_key = "RLro7vCjhhhyet8dY7fBjAwvEWalSQBgrnhPCwBjX1vWiOQujgQ51KuEoyH2SnNM"
     api_sec = "Aq8BccImuXGNzlD3EFv9Lh4h0sQnSgWIZJrbCOvCXIZslcKeCM3hXVJ6sgjc0Fi0"
-    testnet = True
 
     try:
-        sma_crossover = await SmaCrossOver.create(api_key, api_sec, testnet, trade_state)
-        await asyncio.gather(sma_crossover.fetch_price(), sma_crossover.run())
+        sma_crossover = await SmaCrossOver.create(api_key, api_sec, trade_state)
+        await asyncio.gather(sma_crossover.fetch_price(), sma_crossover.run(trade_parameters))
     except Exception as e:
         print(f"Error during trading: {e}")
     finally:
