@@ -16,7 +16,7 @@ class SmaCrossOver:
         self._first_price_info_fut = None
         self.socketio = socketio
         self.symbol = symbol
-        self.balance = trade_state.get('balance', 10000)  # Default balance
+        self.balance = 10000.0  # Starting balance
         self.holdings = 0  # Amount of crypto held
         self.total_profit = 0  # Track total profit/loss
         self.trades_made = 0  # Track number of trades
@@ -53,9 +53,6 @@ class SmaCrossOver:
         buy_price = 0
         state = 0
         
-        # Calculate how much to invest per trade (40% of balance)
-        investment_per_trade = self.balance * 0.4
-
         await self._first_price_info_fut
 
         while self.trade_state['running']:
@@ -98,14 +95,14 @@ class SmaCrossOver:
                 bb_lower = bb["lower_b"].iloc[-1]
                 bb_upper = bb["upper_b"].iloc[-1]
                 
-                current_price = float(kline_dict['close'])
-                
                 if state == 0 and shortterm_sma > longterm_sma and rsi < trade_parameters['rsi_oversold'] and price_df["close"].iloc[-1] < bb_lower:
-                    # Calculate how many coins we can buy
-                    investment = min(investment_per_trade, self.balance)
-                    if investment >= 10:  # Minimum trade size
-                        self.holdings = investment / current_price
-                        self.balance -= investment
+                    # Calculate trade amount (40% of current balance)
+                    trade_amount = self.balance * 0.4
+                    current_price = float(kline_dict['close'])
+                    
+                    if trade_amount >= 10:  # Minimum trade size
+                        self.holdings = trade_amount / current_price
+                        self.balance -= trade_amount
                         buy_price = current_price
                         state = 1
                         self.trades_made += 1
@@ -113,36 +110,38 @@ class SmaCrossOver:
                         trade_info = {
                             **kline_dict,
                             'symbol': self.symbol,
+                            'close': current_price,
                             'balance': round(self.balance, 2),
                             'holdings_value': round(self.holdings * current_price, 2),
                             'total_value': round(self.balance + (self.holdings * current_price), 2),
-                            'trade_amount': round(investment, 2),
+                            'trade_amount': round(trade_amount, 2),
                             'total_profit': round(self.total_profit, 2),
                             'trades_made': self.trades_made
                         }
                         
-                        print(f"{self.symbol} BUY: {current_price} | Amount: {investment:.2f} USDT | Balance: {self.balance:.2f} USDT")
+                        print(f"{self.symbol} BUY: ${current_price:.2f} | Amount: ${trade_amount:.2f} | Balance: ${self.balance:.2f}")
                         send_buy_signal(self.socketio, trade_info)
 
-                elif state == 1 and (shortterm_sma < longterm_sma or rsi > trade_parameters['rsi_overbought'] or price_df["close"].iloc[-1] > bb_upper) and buy_price - current_price != 0:
-                    # Sell all holdings
-                    sell_amount = self.holdings * current_price
-                    trade_profit = sell_amount - (self.holdings * buy_price)
+                elif state == 1 and (shortterm_sma < longterm_sma or rsi > trade_parameters['rsi_overbought'] or price_df["close"].iloc[-1] > bb_upper) and current_price - buy_price != 0:
+                    current_price = float(kline_dict['close'])
+                    sell_value = self.holdings * current_price
+                    trade_profit = sell_value - (self.holdings * buy_price)
+                    
+                    self.balance += sell_value
                     self.total_profit += trade_profit
-                    self.balance += sell_amount
                     
                     trade_info = {
                         **kline_dict,
                         'symbol': self.symbol,
+                        'close': current_price,
                         'balance': round(self.balance, 2),
-                        'holdings_value': 0,
-                        'total_value': round(self.balance, 2),
                         'trade_profit': round(trade_profit, 2),
+                        'total_value': round(self.balance, 2),
                         'total_profit': round(self.total_profit, 2),
                         'trades_made': self.trades_made
                     }
                     
-                    print(f"{self.symbol} SELL: {current_price} | Profit: {trade_profit:.2f} USDT | Balance: {self.balance:.2f} USDT")
+                    print(f"{self.symbol} SELL: ${current_price:.2f} | Profit: ${trade_profit:.2f} | Balance: ${self.balance:.2f}")
                     send_sell_signal(self.socketio, trade_info)
                     
                     state = 0
