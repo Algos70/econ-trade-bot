@@ -163,6 +163,13 @@ def update_trade_parameters():
         'parameters': parameters
     })
 
+@api.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', '*')
+    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+    return response
+
 def register_routes(app):
     """Register API routes with the Flask app."""
     app.register_blueprint(api, url_prefix='/api')

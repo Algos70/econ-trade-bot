@@ -8,7 +8,6 @@ def create_app():
     app.config.from_object(Config)
 
     socketio.init_app(app)
-
     register_routes(app)
 
     return app
