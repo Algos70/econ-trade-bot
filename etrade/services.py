@@ -53,7 +53,6 @@ class SmaCrossOver:
         while self.trade_state['running']:
             # Extract the relevant kline data from the WebSocket message
             kline_data = self._price_info['k']  # 'k' contains the kline data
-            
             # Create a dictionary with all kline data
             kline_dict = {
                 "timestamp": kline_data['t'],
@@ -87,25 +86,29 @@ class SmaCrossOver:
                 rsi = await self.calculate_rsi_with_pandas_ta(price_df["close"], 14)
                 if pd.isna(rsi):
                     rsi = 0
-                print(f"RSI: {rsi} | Short-term SMA: {shortterm_sma} | Long-term SMA: {longterm_sma}")
 
-                if state == 0 and shortterm_sma > longterm_sma and rsi < 30:
-                    # Buy signal: SMA crossover and RSI indicates oversold condition
+                bb = ta.bbands(price_df["close"], length=round(g_shortterm/2))
+                bb.columns = ["lower_b", "middle_b", "upper_b", "b_p", "p_p"]
+
+                # Extract the renamed columns for use
+                bb_lower = bb["lower_b"].iloc[-1]
+                bb_upper = bb["upper_b"].iloc[-1]
+                
+                if state == 0 and shortterm_sma > longterm_sma and rsi < 30 and price_df["close"].iloc[-1] < bb_lower:
+                    # Buy signal: SMA crossover, RSI indicates oversold, and price below lower Bollinger Band
                     print(f"BUY: {kline_dict['close']} | Short SMA: {shortterm_sma} > Long SMA: {longterm_sma} | RSI: {rsi}")
                     buy_price = kline_dict['close']
                     state = 1  # Change state to "holding" position
-
-                elif state == 1 and (shortterm_sma < longterm_sma or rsi > 70) and kline_dict['close'] - buy_price != 0:
-                    # Sell signal: SMA crossover or RSI indicates overbought condition
+                elif state == 1 and (shortterm_sma < longterm_sma or rsi > 70 or price_df["close"].iloc[-1] > bb_upper) and kline_dict['close'] - buy_price != 0:
+                    # Sell signal: SMA crossover, RSI indicates overbought, or price above upper Bollinger Band
                     print(f"SELL: {kline_dict['close']} | Profit: {kline_dict['close'] - buy_price} USDT | RSI: {rsi}")
                     state = 0  # Change state to "not holding" position
+                    buy_price = 0
 
             await asyncio.sleep(g_cycle)
     async def calculate_rsi_with_pandas_ta(self, price_list, period=14):
         """Calculate the RSI using pandas_ta."""
         prices = pd.DataFrame(price_list, columns=["close"])
-        prices = prices.iloc[::-1].reset_index(drop=True)
-
         prices["rsi"] = ta.rsi(prices["close"], length=period)
         return prices["rsi"].iloc[-1]
 
