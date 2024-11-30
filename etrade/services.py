@@ -5,7 +5,7 @@ import pandas as pd
 from .sockets import send_kline_data, send_buy_signal, send_sell_signal
 
 g_cycle = 1
-g_longterm = 40
+g_longterm = 50
 g_shortterm = 24
 
 class SmaCrossOver:
@@ -16,6 +16,10 @@ class SmaCrossOver:
         self._first_price_info_fut = None
         self.socketio = socketio
         self.symbol = symbol
+        self.balance = trade_state.get('balance', 10000)  # Default balance
+        self.holdings = 0  # Amount of crypto held
+        self.total_profit = 0  # Track total profit/loss
+        self.trades_made = 0  # Track number of trades
 
     @classmethod
     async def create(cls, api_key, api_sec, trade_state, socketio, symbol):
@@ -42,15 +46,17 @@ class SmaCrossOver:
 
     async def run(self, trade_parameters):
         """Run the SMA crossover trading algorithm."""
-        # Create an empty DataFrame to hold all kline data
         price_df = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "close_time", 
                                        "quote_asset_volume", "number_of_trades", "taker_buy_base_asset_volume", 
                                        "taker_buy_quote_asset_volume", "ignore"])
 
         buy_price = 0
         state = 0
+        
+        # Calculate how much to invest per trade (40% of balance)
+        investment_per_trade = self.balance * 0.4
 
-        await self._first_price_info_fut  # Wait until first price info is received.
+        await self._first_price_info_fut
 
         while self.trade_state['running']:
             kline_data = self._price_info['k']
@@ -92,15 +98,55 @@ class SmaCrossOver:
                 bb_lower = bb["lower_b"].iloc[-1]
                 bb_upper = bb["upper_b"].iloc[-1]
                 
+                current_price = float(kline_dict['close'])
+                
                 if state == 0 and shortterm_sma > longterm_sma and rsi < trade_parameters['rsi_oversold'] and price_df["close"].iloc[-1] < bb_lower:
-                    print(f"{self.symbol} BUY: {kline_dict['close']} | Short SMA: {shortterm_sma} > Long SMA: {longterm_sma} | RSI: {rsi}")
-                    send_buy_signal(self.socketio, {**kline_dict, 'symbol': self.symbol})
-                    buy_price = kline_dict['close']
-                    state = 1
-                elif state == 1 and (shortterm_sma < longterm_sma or rsi > trade_parameters['rsi_overbought'] or price_df["close"].iloc[-1] > bb_upper) and kline_dict['close'] - buy_price != 0:
-                    print(f"{self.symbol} SELL: {kline_dict['close']} | Profit: {kline_dict['close'] - buy_price} USDT | RSI: {rsi}")
-                    send_sell_signal(self.socketio, {**kline_dict, 'symbol': self.symbol})
+                    # Calculate how many coins we can buy
+                    investment = min(investment_per_trade, self.balance)
+                    if investment >= 10:  # Minimum trade size
+                        self.holdings = investment / current_price
+                        self.balance -= investment
+                        buy_price = current_price
+                        state = 1
+                        self.trades_made += 1
+                        
+                        trade_info = {
+                            **kline_dict,
+                            'symbol': self.symbol,
+                            'balance': round(self.balance, 2),
+                            'holdings_value': round(self.holdings * current_price, 2),
+                            'total_value': round(self.balance + (self.holdings * current_price), 2),
+                            'trade_amount': round(investment, 2),
+                            'total_profit': round(self.total_profit, 2),
+                            'trades_made': self.trades_made
+                        }
+                        
+                        print(f"{self.symbol} BUY: {current_price} | Amount: {investment:.2f} USDT | Balance: {self.balance:.2f} USDT")
+                        send_buy_signal(self.socketio, trade_info)
+
+                elif state == 1 and (shortterm_sma < longterm_sma or rsi > trade_parameters['rsi_overbought'] or price_df["close"].iloc[-1] > bb_upper) and buy_price - current_price != 0:
+                    # Sell all holdings
+                    sell_amount = self.holdings * current_price
+                    trade_profit = sell_amount - (self.holdings * buy_price)
+                    self.total_profit += trade_profit
+                    self.balance += sell_amount
+                    
+                    trade_info = {
+                        **kline_dict,
+                        'symbol': self.symbol,
+                        'balance': round(self.balance, 2),
+                        'holdings_value': 0,
+                        'total_value': round(self.balance, 2),
+                        'trade_profit': round(trade_profit, 2),
+                        'total_profit': round(self.total_profit, 2),
+                        'trades_made': self.trades_made
+                    }
+                    
+                    print(f"{self.symbol} SELL: {current_price} | Profit: {trade_profit:.2f} USDT | Balance: {self.balance:.2f} USDT")
+                    send_sell_signal(self.socketio, trade_info)
+                    
                     state = 0
+                    self.holdings = 0
                     buy_price = 0
 
             await asyncio.sleep(g_cycle)
@@ -112,7 +158,7 @@ class SmaCrossOver:
         return prices["rsi"].iloc[-1]
 
 async def trade_with_timeout(trade_state, trade_parameters, socketio):
-    """Handles trading logic with SmaCrossOver and a 5-minute timeout."""
+    """Handles trading logic with SmaCrossOver."""
     api_key = "RLro7vCjhhhyet8dY7fBjAwvEWalSQBgrnhPCwBjX1vWiOQujgQ51KuEoyH2SnNM"
     api_sec = "Aq8BccImuXGNzlD3EFv9Lh4h0sQnSgWIZJrbCOvCXIZslcKeCM3hXVJ6sgjc0Fi0"
 
