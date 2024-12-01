@@ -6,7 +6,7 @@ from flask_cors import CORS
 
 def create_app():
     app = Flask(__name__)
-    CORS(app) 
+    CORS(app, resources={r"/api/*": {"origins": "*"}})
     app.config.from_object(Config)
 
     socketio.init_app(app)

@@ -96,7 +96,7 @@ class SmaCrossOver:
 
                 bb_lower = bb["lower_b"].iloc[-1]
                 bb_upper = bb["upper_b"].iloc[-1]
-                
+                print("parameters", trade_parameters)
                 if state == 0 and shortterm_sma > longterm_sma and rsi < trade_parameters['rsi_oversold'] and price_df["close"].iloc[-1] < bb_lower:
                     # Calculate trade amount (40% of current balance)
                     trade_amount = self.balance * 0.4

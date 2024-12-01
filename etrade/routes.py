@@ -3,8 +3,10 @@ from threading import Thread
 from .services import trade_with_timeout
 import asyncio
 from etrade.extensions import socketio
+from flask_cors import CORS
 
 api = Blueprint('api', __name__)
+CORS(api, resources={r"/*": {"origins": "*"}})
 
 # Dictionary to track state for each trading pair
 trade_states = {
