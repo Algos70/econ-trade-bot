@@ -52,11 +52,63 @@ class LiveTrade:
                                        "quote_asset_volume", "number_of_trades", "taker_buy_base_asset_volume", 
                                        "taker_buy_quote_asset_volume", "ignore"])
 
+        historical_klines = await self._client.get_klines(
+           symbol=self.symbol,
+            interval=Client.KLINE_INTERVAL_1MINUTE,
+            limit=g_longterm
+        )
+
+        # Convert historical klines to dataframe format
+        for i, kline in enumerate(historical_klines):
+            kline_dict = {
+                "timestamp": kline[0],
+                "open": float(kline[1]),
+                "high": float(kline[2]),
+                "low": float(kline[3]),
+                "close": float(kline[4]),
+                "volume": float(kline[5]),
+                "close_time": kline[6],
+                "quote_asset_volume": float(kline[7]),
+                "number_of_trades": kline[8],
+                "taker_buy_base_asset_volume": float(kline[9]),
+                "taker_buy_quote_asset_volume": float(kline[10]),
+                "ignore": kline[11]
+            }
+            # Create kline data in the same format as websocket data
+            current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+            historical_event_time = current_time - ((50 - i) * 1000)  # Start from 50 seconds ago
+            historical_kline_data = {
+                'e': 'kline',
+                'E': historical_event_time,  # Event time (sequenced from past to present)
+                's': self.symbol,
+                'k': {
+                    't': kline[0],  # Kline start time
+                    'T': kline[6],  # Kline close time
+                    's': self.symbol,
+                    'i': '1m',      # Interval
+                    'f': kline[8],  # First trade ID
+                    'L': kline[8],  # Last trade ID
+                    'o': str(kline[1]),  # Open
+                    'c': str(kline[4]),  # Close
+                    'h': str(kline[2]),  # High
+                    'l': str(kline[3]),  # Low
+                    'v': str(kline[5]),  # Volume
+                    'n': kline[8],       # Number of trades
+                    'x': True,           # Is this kline closed? (True for historical)
+                    'q': str(kline[7]),  # Quote asset volume
+                    'V': str(kline[9]),  # Taker buy base asset volume
+                    'Q': str(kline[10]), # Taker buy quote asset volume
+                    'B': str(kline[11])  # Ignore
+                }
+            }
+            send_kline_data(self.socketio, historical_kline_data)
+            kline_df = pd.DataFrame([kline_dict])
+            price_df = pd.concat([price_df, kline_df], ignore_index=True)
+
         buy_price = 0
         state = 0
         
         await self._first_price_info_fut
-
         while self.trade_state['running']:
             kline_data = self._price_info['k']
             send_kline_data(self.socketio, self._price_info)
@@ -79,7 +131,6 @@ class LiveTrade:
             kline_df = pd.DataFrame([kline_dict])
             price_df = pd.concat([price_df, kline_df], ignore_index=True)
             price_df = price_df.tail(g_longterm)
-
             if len(price_df) >= g_longterm:
                 price_df["longterm_sma"] = ta.sma(price_df["close"], length=trade_parameters['longterm_sma'])
                 price_df["shortterm_sma"] = ta.sma(price_df["close"], length=trade_parameters['shortterm_sma'])
@@ -90,13 +141,18 @@ class LiveTrade:
                 rsi = await self.calculate_rsi_with_pandas_ta(price_df["close"], trade_parameters['rsi_period'])
                 if pd.isna(rsi):
                     rsi = 0
-
+                
                 bb = ta.bbands(price_df["close"], length=trade_parameters['bb_lenght'])
                 bb.columns = ["lower_b", "middle_b", "upper_b", "b_p", "p_p"]
 
                 bb_lower = bb["lower_b"].iloc[-1]
                 bb_upper = bb["upper_b"].iloc[-1]
-                print("parameters", trade_parameters)
+                print("rsi: ", rsi)
+                print("longterm_sma: ", longterm_sma)
+                print("shortterm_sma: ", shortterm_sma)
+                print("bb_lower: ", bb_lower)
+                print("bb_upper: ", bb_upper)
+
                 current_price = float(kline_dict['close'])
                 if (state == 0 and 
                     float(shortterm_sma) > float(longterm_sma) and 
