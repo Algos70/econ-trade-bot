@@ -97,10 +97,13 @@ class LiveTrade:
                 bb_lower = bb["lower_b"].iloc[-1]
                 bb_upper = bb["upper_b"].iloc[-1]
                 print("parameters", trade_parameters)
-                if state == 0 and shortterm_sma > longterm_sma and rsi < trade_parameters['rsi_oversold'] and price_df["close"].iloc[-1] < bb_lower:
+                current_price = float(kline_dict['close'])
+                if (state == 0 and 
+                    float(shortterm_sma) > float(longterm_sma) and 
+                    float(rsi) < float(trade_parameters['rsi_oversold']) and 
+                    float(price_df["close"].iloc[-1]) < float(bb_lower)):
                     # Calculate trade amount (40% of current balance)
                     trade_amount = self.balance * 0.4
-                    current_price = float(kline_dict['close'])
                     
                     if trade_amount >= 10:  # Minimum trade size
                         self.holdings = trade_amount / current_price
@@ -124,9 +127,12 @@ class LiveTrade:
                         print(f"{self.symbol} BUY: ${current_price:.2f} | Amount: ${trade_amount:.2f} | Balance: ${self.balance:.2f}")
                         send_buy_signal(self.socketio, trade_info)
 
-                elif (state == 1 and (shortterm_sma < longterm_sma or rsi > trade_parameters['rsi_overbought'] or price_df["close"].iloc[-1] > bb_upper
-                                      or price_df["close"].iloc[-1] - buy_price > self.stop_loss_pct * buy_price)) and current_price - buy_price != 0:
-                    current_price = float(kline_dict['close'])
+                elif (state == 1 and 
+                      (float(shortterm_sma) < float(longterm_sma) or 
+                       float(rsi) > float(trade_parameters['rsi_overbought']) or 
+                       float(price_df["close"].iloc[-1]) > float(bb_upper) or
+                       float(price_df["close"].iloc[-1]) - float(buy_price) > self.stop_loss_pct * float(buy_price)) and 
+                      float(current_price) - float(buy_price) != 0):
                     sell_value = self.holdings * current_price
                     trade_profit = sell_value - (self.holdings * buy_price)
                     
