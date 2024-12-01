@@ -1,5 +1,4 @@
 from flask_socketio import emit
-from flask import current_app
 
 def handle_connect():
     """Handle a new connection."""

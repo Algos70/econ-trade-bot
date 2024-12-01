@@ -1,4 +1,4 @@
-Flask==3.1.0
+Flask[async]==3.1.0
 python-binance==1.0.23
 pandas-ta==0.3.14b
 Flask-SocketIO==5.4.1

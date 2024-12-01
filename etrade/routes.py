@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 from threading import Thread
-from .services import trade_with_timeout
+from .services import trade_with_timeout, start_backtest
 import asyncio
 from etrade.extensions import socketio
 from flask_cors import CORS
@@ -164,6 +164,36 @@ def update_trade_parameters():
         'updated_pairs': updated_pairs,
         'parameters': parameters
     })
+
+@api.route('/backtest', methods=['POST'])
+async def backtest():
+    """Endpoint to backtest trading strategies."""
+    incoming_data = request.json
+
+    if not incoming_data:
+        return jsonify({'status': 'error', 'message': 'No parameters provided'}), 400
+
+    symbol = incoming_data.get('symbol')
+    if not symbol:
+        return jsonify({'status': 'error', 'message': 'No symbols provided'}), 400
+    
+    parameters = incoming_data.get('parameters', {})
+    if not parameters:
+        return jsonify({'status': 'error', 'message': 'No parameters provided'}), 400
+    
+    try:
+        backtest = await start_backtest(symbol, parameters)
+        return jsonify({
+            'status': 'success',
+            'message': 'Backtest completed',
+            'symbol': symbol,
+            'results': backtest
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Backtest failed: {str(e)}'
+        }), 500
 
 @api.after_request
 def after_request(response):
