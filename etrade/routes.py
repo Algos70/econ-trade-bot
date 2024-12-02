@@ -4,7 +4,9 @@ This module contains the routes for the econ-trade-bot API.
 
 from threading import Thread
 import asyncio
+# pylint: disable=import-error
 from flask_cors import CORS
+# pylint: disable=import-error
 from flask import Blueprint, jsonify, request
 from etrade.extensions import socketio
 from .services import trade_with_timeout, start_backtest
@@ -39,7 +41,7 @@ default_parameters = {
 # Dictionary to store parameters for each trading pair
 trade_parameters = {
     symbol: default_parameters.copy() | {"symbol": symbol}
-    for symbol in trade_states.keys()
+    for symbol, _ in trade_states.items()
 }
 
 
@@ -52,8 +54,8 @@ def start_trade():
     started_pairs = []
     error_pairs = []
 
-    for symbol in trade_states.keys():
-        if trade_states[symbol]["running"]:
+    for symbol, state in trade_states.items():
+        if state["running"]:
             error_pairs.append(symbol)
             continue
 
