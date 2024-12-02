@@ -2,6 +2,7 @@
 This module contains the extensions for the econ-trade-bot API.
 """
 
+# pylint: disable=import-error
 from flask_socketio import SocketIO
 
 socketio = SocketIO(
