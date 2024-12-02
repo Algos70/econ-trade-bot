@@ -3,19 +3,24 @@ This module contains the trading services for the econ-trade-bot API.
 """
 
 import asyncio
+from datetime import datetime, timedelta, timezone
+# pylint: disable=import-error
 from binance import AsyncClient, BinanceSocketManager, Client
+# pylint: disable=import-error
 import pandas_ta as ta
 import pandas as pd
 from .sockets import send_kline_data, send_buy_signal, send_sell_signal
-from datetime import datetime, timedelta, timezone
 
-g_cycle = 1
-g_longterm = 50
-g_shortterm = 24
+
+G_CYCLE = 1
+G_LONGTERM = 50
 
 
 class LiveTrade:
+    """Class for live trading."""
+
     def __init__(self, trade_state, socketio, symbol):
+        """Initialize the LiveTrade instance."""
         self.trade_state = trade_state
         self._client = None
         self._price_info = None
@@ -69,10 +74,135 @@ class LiveTrade:
                 "ignore",
             ]
         )
-
         historical_klines = await self._client.get_klines(
-            symbol=self.symbol, interval=Client.KLINE_INTERVAL_1MINUTE, limit=g_longterm
+            symbol=self.symbol, interval=Client.KLINE_INTERVAL_1MINUTE, limit=G_LONGTERM
         )
+        price_df = await self.process_historical_klines(historical_klines, price_df)
+        buy_price = 0
+        state = 0
+
+        await self._first_price_info_fut
+        while self.trade_state["running"]:
+            kline_data = self._price_info["k"]
+            send_kline_data(self.socketio, self._price_info)
+
+            kline_dict = {
+                "timestamp": kline_data["t"],
+                "open": float(kline_data["o"]),
+                "high": float(kline_data["h"]),
+                "low": float(kline_data["l"]),
+                "close": float(kline_data["c"]),
+                "volume": float(kline_data["v"]),
+                "close_time": kline_data["T"],
+                "quote_asset_volume": float(kline_data["q"]),
+                "number_of_trades": kline_data["n"],
+                "taker_buy_base_asset_volume": float(kline_data["V"]),
+                "taker_buy_quote_asset_volume": float(kline_data["Q"]),
+                "ignore": kline_data["B"],
+            }
+
+            kline_df = pd.DataFrame([kline_dict])
+            price_df = pd.concat([price_df, kline_df], ignore_index=True)
+            price_df = price_df.tail(G_LONGTERM)
+            if len(price_df) >= G_LONGTERM:
+                price_df["longterm_sma"] = ta.sma(
+                    price_df["close"], length=trade_parameters["longterm_sma"]
+                )
+                price_df["shortterm_sma"] = ta.sma(
+                    price_df["close"], length=trade_parameters["shortterm_sma"]
+                )
+
+                longterm_sma = price_df["longterm_sma"].iloc[-1]
+                shortterm_sma = price_df["shortterm_sma"].iloc[-1]
+
+                rsi = await self.calculate_rsi_with_pandas_ta(
+                    price_df["close"], trade_parameters["rsi_period"]
+                )
+                if pd.isna(rsi):
+                    rsi = 0
+
+                bb = ta.bbands(price_df["close"], length=trade_parameters["bb_lenght"])
+                bb.columns = ["lower_b", "middle_b", "upper_b", "b_p", "p_p"]
+
+                bb_lower = bb["lower_b"].iloc[-1]
+                bb_upper = bb["upper_b"].iloc[-1]
+                current_price = float(kline_dict["close"])
+                if (
+                    state == 0
+                    and float(shortterm_sma) > float(longterm_sma)
+                    and float(rsi) < float(trade_parameters["rsi_oversold"])
+                    and float(price_df["close"].iloc[-1]) < float(bb_lower)
+                ):
+                    # Calculate trade amount (40% of current balance)
+                    trade_amount = self.balance * 0.4
+
+                    if trade_amount >= 10:  # Minimum trade size
+                        self.holdings = trade_amount / current_price
+                        self.balance -= trade_amount
+                        buy_price = current_price
+                        state = 1
+                        self.trades_made += 1
+
+                        trade_info = {
+                            **kline_dict,
+                            "symbol": self.symbol,
+                            "close": current_price,
+                            "balance": round(self.balance, 2),
+                            "holdings_value": round(self.holdings * current_price, 2),
+                            "total_value": round(
+                                self.balance + (self.holdings * current_price), 2
+                            ),
+                            "trade_amount": round(trade_amount, 2),
+                            "total_profit": round(self.total_profit, 2),
+                            "trades_made": self.trades_made,
+                        }
+
+                        send_buy_signal(self.socketio, trade_info)
+
+                elif (
+                    state == 1
+                    and (
+                        float(shortterm_sma) < float(longterm_sma)
+                        or float(rsi) > float(trade_parameters["rsi_overbought"])
+                        or float(price_df["close"].iloc[-1]) > float(bb_upper)
+                        or float(price_df["close"].iloc[-1]) - float(buy_price)
+                        > self.stop_loss_pct * float(buy_price)
+                    )
+                    and float(current_price) - float(buy_price) != 0
+                ):
+                    sell_value = self.holdings * current_price
+                    trade_profit = sell_value - (self.holdings * buy_price)
+
+                    self.balance += sell_value
+                    self.total_profit += trade_profit
+
+                    trade_info = {
+                        **kline_dict,
+                        "symbol": self.symbol,
+                        "close": current_price,
+                        "balance": round(self.balance, 2),
+                        "trade_profit": round(trade_profit, 2),
+                        "total_value": round(self.balance, 2),
+                        "total_profit": round(self.total_profit, 2),
+                        "trades_made": self.trades_made,
+                    }
+
+                    send_sell_signal(self.socketio, trade_info)
+
+                    state = 0
+                    self.holdings = 0
+                    buy_price = 0
+
+            await asyncio.sleep(G_CYCLE)
+
+    async def calculate_rsi_with_pandas_ta(self, price_list, period=14):
+        """Calculate the RSI using pandas_ta."""
+        prices = pd.DataFrame(price_list, columns=["close"])
+        prices["rsi"] = ta.rsi(prices["close"], length=period)
+        return prices["rsi"].iloc[-1]
+    
+    async def process_historical_klines(self,historical_klines, price_df):
+        """Process historical klines."""
 
         # Convert historical klines to dataframe format
         for i, kline in enumerate(historical_klines):
@@ -122,145 +252,13 @@ class LiveTrade:
             send_kline_data(self.socketio, historical_kline_data)
             kline_df = pd.DataFrame([kline_dict])
             price_df = pd.concat([price_df, kline_df], ignore_index=True)
-
-        buy_price = 0
-        state = 0
-
-        await self._first_price_info_fut
-        while self.trade_state["running"]:
-            kline_data = self._price_info["k"]
-            send_kline_data(self.socketio, self._price_info)
-
-            kline_dict = {
-                "timestamp": kline_data["t"],
-                "open": float(kline_data["o"]),
-                "high": float(kline_data["h"]),
-                "low": float(kline_data["l"]),
-                "close": float(kline_data["c"]),
-                "volume": float(kline_data["v"]),
-                "close_time": kline_data["T"],
-                "quote_asset_volume": float(kline_data["q"]),
-                "number_of_trades": kline_data["n"],
-                "taker_buy_base_asset_volume": float(kline_data["V"]),
-                "taker_buy_quote_asset_volume": float(kline_data["Q"]),
-                "ignore": kline_data["B"],
-            }
-
-            kline_df = pd.DataFrame([kline_dict])
-            price_df = pd.concat([price_df, kline_df], ignore_index=True)
-            price_df = price_df.tail(g_longterm)
-            if len(price_df) >= g_longterm:
-                price_df["longterm_sma"] = ta.sma(
-                    price_df["close"], length=trade_parameters["longterm_sma"]
-                )
-                price_df["shortterm_sma"] = ta.sma(
-                    price_df["close"], length=trade_parameters["shortterm_sma"]
-                )
-
-                longterm_sma = price_df["longterm_sma"].iloc[-1]
-                shortterm_sma = price_df["shortterm_sma"].iloc[-1]
-
-                rsi = await self.calculate_rsi_with_pandas_ta(
-                    price_df["close"], trade_parameters["rsi_period"]
-                )
-                if pd.isna(rsi):
-                    rsi = 0
-
-                bb = ta.bbands(price_df["close"], length=trade_parameters["bb_lenght"])
-                bb.columns = ["lower_b", "middle_b", "upper_b", "b_p", "p_p"]
-
-                bb_lower = bb["lower_b"].iloc[-1]
-                bb_upper = bb["upper_b"].iloc[-1]
-                print("rsi: ", rsi)
-                print("longterm_sma: ", longterm_sma)
-                print("shortterm_sma: ", shortterm_sma)
-                print("bb_lower: ", bb_lower)
-                print("bb_upper: ", bb_upper)
-
-                current_price = float(kline_dict["close"])
-                if (
-                    state == 0
-                    and float(shortterm_sma) > float(longterm_sma)
-                    and float(rsi) < float(trade_parameters["rsi_oversold"])
-                    and float(price_df["close"].iloc[-1]) < float(bb_lower)
-                ):
-                    # Calculate trade amount (40% of current balance)
-                    trade_amount = self.balance * 0.4
-
-                    if trade_amount >= 10:  # Minimum trade size
-                        self.holdings = trade_amount / current_price
-                        self.balance -= trade_amount
-                        buy_price = current_price
-                        state = 1
-                        self.trades_made += 1
-
-                        trade_info = {
-                            **kline_dict,
-                            "symbol": self.symbol,
-                            "close": current_price,
-                            "balance": round(self.balance, 2),
-                            "holdings_value": round(self.holdings * current_price, 2),
-                            "total_value": round(
-                                self.balance + (self.holdings * current_price), 2
-                            ),
-                            "trade_amount": round(trade_amount, 2),
-                            "total_profit": round(self.total_profit, 2),
-                            "trades_made": self.trades_made,
-                        }
-
-                        print(
-                            f"{self.symbol} BUY: ${current_price:.2f} | Amount: ${trade_amount:.2f} | Balance: ${self.balance:.2f}"
-                        )
-                        send_buy_signal(self.socketio, trade_info)
-
-                elif (
-                    state == 1
-                    and (
-                        float(shortterm_sma) < float(longterm_sma)
-                        or float(rsi) > float(trade_parameters["rsi_overbought"])
-                        or float(price_df["close"].iloc[-1]) > float(bb_upper)
-                        or float(price_df["close"].iloc[-1]) - float(buy_price)
-                        > self.stop_loss_pct * float(buy_price)
-                    )
-                    and float(current_price) - float(buy_price) != 0
-                ):
-                    sell_value = self.holdings * current_price
-                    trade_profit = sell_value - (self.holdings * buy_price)
-
-                    self.balance += sell_value
-                    self.total_profit += trade_profit
-
-                    trade_info = {
-                        **kline_dict,
-                        "symbol": self.symbol,
-                        "close": current_price,
-                        "balance": round(self.balance, 2),
-                        "trade_profit": round(trade_profit, 2),
-                        "total_value": round(self.balance, 2),
-                        "total_profit": round(self.total_profit, 2),
-                        "trades_made": self.trades_made,
-                    }
-
-                    print(
-                        f"{self.symbol} SELL: ${current_price:.2f} | Profit: ${trade_profit:.2f} | Balance: ${self.balance:.2f}"
-                    )
-                    send_sell_signal(self.socketio, trade_info)
-
-                    state = 0
-                    self.holdings = 0
-                    buy_price = 0
-
-            await asyncio.sleep(g_cycle)
-
-    async def calculate_rsi_with_pandas_ta(self, price_list, period=14):
-        """Calculate the RSI using pandas_ta."""
-        prices = pd.DataFrame(price_list, columns=["close"])
-        prices["rsi"] = ta.rsi(prices["close"], length=period)
-        return prices["rsi"].iloc[-1]
-
+        return price_df
 
 class Backtest:
+    """Class for backtesting."""
+
     def __init__(self, symbol):
+        """Initialize the Backtest instance."""
         self._client = None
         self.now = datetime.now(timezone.utc)
         self.historical_days = 120
@@ -283,11 +281,13 @@ class Backtest:
 
     @classmethod
     async def create(cls, symbol, api_key, api_sec):
+        """Create and initialize the Backtest instance."""
         instance = cls(symbol)
         instance._client = await AsyncClient.create(api_key, api_sec, tld="com")
         return instance
 
     def generate_buy_signals(self, df, rsi):
+        """Generate buy signals based on the given conditions."""
         df["buy_signal"] = (
             (df["Close"] <= df["bb_lower"])
             & (df["rsi"] < rsi)
@@ -296,6 +296,7 @@ class Backtest:
         return df
 
     def generate_sell_signal(self, df, rsi):
+        """Generate sell signals based on the given conditions."""
         df["sell_signal"] = (
             (df["Close"] >= df["bb_upper"])
             & (df["rsi"] > rsi)
@@ -306,10 +307,11 @@ class Backtest:
     def execute_trades_with_stop_loss(
         self, df, money, etc_amount, stop_loss_percentage, symbol
     ):
+        """Execute trades with stop-loss."""
         stop_loss_price = None
         trade_signals = []  # Array to store all trading signals
 
-        for index, row in df.iterrows():
+        for row in df.iterrows():
             if row["buy_signal"] and money > 0:
                 etc_to_buy = money / row["Close"]
                 etc_amount += etc_to_buy
@@ -324,9 +326,6 @@ class Backtest:
                         "amount": etc_to_buy,
                         "total": etc_to_buy * row["Close"],
                     }
-                )
-                print(
-                    f"Buy executed on {row.name}: Price = {row['Close']}, {symbol} bought = {etc_to_buy}"
                 )
                 continue
 
@@ -347,9 +346,6 @@ class Backtest:
                         "total": sell_value,
                     }
                 )
-                print(
-                    f"Stop-loss triggered on {row.name}: Price = {row['Close']}, {symbol} sold = {etc_amount}"
-                )
                 etc_amount = 0
                 stop_loss_price = None
 
@@ -365,9 +361,6 @@ class Backtest:
                         "amount": etc_amount,
                         "total": sell_value,
                     }
-                )
-                print(
-                    f"Sell executed on {row.name}: Price = {row['Close']}, {symbol} sold = {etc_amount}"
                 )
                 etc_amount = 0
                 stop_loss_price = None
@@ -395,6 +388,7 @@ class Backtest:
         return money, trade_signals
 
     async def run(self, parameters):
+        """Run the backtest."""
         bars1 = await self._client.get_historical_klines(
             symbol=self.symbol,
             interval=self.bar_length1,
@@ -485,6 +479,7 @@ class Backtest:
         }
 
     async def construct_dataframe(self, bars):
+        """Construct a dataframe from the given bars."""
         df = pd.DataFrame(bars)
         df["Date"] = pd.to_datetime(df.iloc[:, 0], unit="ms")
         df.columns = [
@@ -530,6 +525,7 @@ async def trade_with_timeout(trade_state, trade_parameters, socketio):
 
 
 async def start_backtest(symbol, parameters):
+    """Start the backtest."""
     api_key = "RLro7vCjhhhyet8dY7fBjAwvEWalSQBgrnhPCwBjX1vWiOQujgQ51KuEoyH2SnNM"
     api_sec = "Aq8BccImuXGNzlD3EFv9Lh4h0sQnSgWIZJrbCOvCXIZslcKeCM3hXVJ6sgjc0Fi0"
     backtest = await Backtest.create(symbol, api_key, api_sec)
