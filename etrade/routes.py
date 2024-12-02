@@ -4,8 +4,10 @@ This module contains the routes for the econ-trade-bot API.
 
 from threading import Thread
 import asyncio
+
 # pylint: disable=import-error
 from flask_cors import CORS
+
 # pylint: disable=import-error
 from flask import Blueprint, jsonify, request
 from etrade.extensions import socketio

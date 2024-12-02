@@ -4,6 +4,7 @@ This module contains the main application for the econ-trade-bot API.
 
 # pylint: disable=import-error
 from flask import Flask
+
 # pylint: disable=import-error
 from flask_cors import CORS
 from etrade.routes import register_routes

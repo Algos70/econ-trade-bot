@@ -4,8 +4,10 @@ This module contains the trading services for the econ-trade-bot API.
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+
 # pylint: disable=import-error
 from binance import AsyncClient, BinanceSocketManager, Client
+
 # pylint: disable=import-error
 import pandas_ta as ta
 import pandas as pd
@@ -163,8 +165,8 @@ class LiveTrade:
                     state == 1
                     and (
                         float(shortterm_sma) < float(longterm_sma)
-                        or float(rsi) > float(trade_parameters["rsi_overbought"])
-                        or float(price_df["close"].iloc[-1]) > float(bb_upper)
+                        and float(rsi) > float(trade_parameters["rsi_overbought"])
+                        and float(price_df["close"].iloc[-1]) > float(bb_upper)
                         or float(price_df["close"].iloc[-1]) - float(buy_price)
                         > self.stop_loss_pct * float(buy_price)
                     )
@@ -200,8 +202,8 @@ class LiveTrade:
         prices = pd.DataFrame(price_list, columns=["close"])
         prices["rsi"] = ta.rsi(prices["close"], length=period)
         return prices["rsi"].iloc[-1]
-    
-    async def process_historical_klines(self,historical_klines, price_df):
+
+    async def process_historical_klines(self, historical_klines, price_df):
         """Process historical klines."""
 
         # Convert historical klines to dataframe format
@@ -253,6 +255,7 @@ class LiveTrade:
             kline_df = pd.DataFrame([kline_dict])
             price_df = pd.concat([price_df, kline_df], ignore_index=True)
         return price_df
+
 
 class Backtest:
     """Class for backtesting."""
@@ -311,7 +314,7 @@ class Backtest:
         stop_loss_price = None
         trade_signals = []  # Array to store all trading signals
 
-        for row in df.iterrows():
+        for index, row in df.iterrows():
             if row["buy_signal"] and money > 0:
                 etc_to_buy = money / row["Close"]
                 etc_amount += etc_to_buy
@@ -413,14 +416,12 @@ class Backtest:
             start_str=self.past,
             end_str=str(self.now),
         )
-
         df1 = await self.construct_dataframe(bars1)
         df2 = await self.construct_dataframe(bars2)
         df3 = await self.construct_dataframe(bars3)
         df4 = await self.construct_dataframe(bars4)
 
         dfs = {"df1": df1, "df2": df2, "df3": df3, "df4": df4}
-
         for df in dfs.values():
             bb = ta.bbands(df["Close"], length=parameters["bb_lenght"])
             df[["bb_lower", "bb_middle", "bb_upper"]] = bb.iloc[:, :3]
