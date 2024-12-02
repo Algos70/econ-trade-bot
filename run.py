@@ -1,3 +1,7 @@
+"""
+This module contains the main entry point for the econ-trade-bot API.
+"""
+
 from etrade import create_app
 from etrade.extensions import socketio
 from etrade.sockets import register_socketio_events
