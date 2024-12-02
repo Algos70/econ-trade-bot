@@ -81,11 +81,6 @@ The bot implements a combined strategy using:
 3. Bollinger Bands for price range analysis
 4. Stop-loss protection (2% by default)
 
-## License
-
-[Add your license information here]
-
 ## Disclaimer
 
 This bot is for educational purposes only. Cryptocurrency trading carries significant risks. Use at your own risk.
-
