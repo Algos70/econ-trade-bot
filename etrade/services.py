@@ -205,8 +205,8 @@ class LiveTrade:
 
     async def process_historical_klines(self, historical_klines, price_df):
         """Process historical klines."""
+        kline_data_list = []  # Collect kline dictionaries for batch processing
 
-        # Convert historical klines to dataframe format
         for i, kline in enumerate(historical_klines):
             kline_dict = {
                 "timestamp": kline[0],
@@ -222,38 +222,43 @@ class LiveTrade:
                 "taker_buy_quote_asset_volume": float(kline[10]),
                 "ignore": kline[11],
             }
-            # Create kline data in the same format as websocket data
+            kline_data_list.append(kline_dict)
+
+            # Create kline data for websocket
             current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
-            historical_event_time = current_time - (
-                (50 - i) * 1000
-            )  # Start from 50 seconds ago
+            historical_event_time = current_time - ((50 - i) * 1000)  # Start from 50 seconds ago
             historical_kline_data = {
                 "e": "kline",
-                "E": historical_event_time,  # Event time (sequenced from past to present)
+                "E": historical_event_time,
                 "s": self.symbol,
                 "k": {
-                    "t": kline[0],  # Kline start time
-                    "T": kline[6],  # Kline close time
+                    "t": kline[0],
+                    "T": kline[6],
                     "s": self.symbol,
-                    "i": "1m",  # Interval
-                    "f": kline[8],  # First trade ID
-                    "L": kline[8],  # Last trade ID
-                    "o": str(kline[1]),  # Open
-                    "c": str(kline[4]),  # Close
-                    "h": str(kline[2]),  # High
-                    "l": str(kline[3]),  # Low
-                    "v": str(kline[5]),  # Volume
-                    "n": kline[8],  # Number of trades
-                    "x": True,  # Is this kline closed? (True for historical)
-                    "q": str(kline[7]),  # Quote asset volume
-                    "V": str(kline[9]),  # Taker buy base asset volume
-                    "Q": str(kline[10]),  # Taker buy quote asset volume
-                    "B": str(kline[11]),  # Ignore
+                    "i": "1m",
+                    "f": kline[8],
+                    "L": kline[8],
+                    "o": str(kline[1]),
+                    "c": str(kline[4]),
+                    "h": str(kline[2]),
+                    "l": str(kline[3]),
+                    "v": str(kline[5]),
+                    "n": kline[8],
+                    "x": True,
+                    "q": str(kline[7]),
+                    "V": str(kline[9]),
+                    "Q": str(kline[10]),
+                    "B": str(kline[11]),
                 },
             }
             send_kline_data(self.socketio, historical_kline_data)
-            kline_df = pd.DataFrame([kline_dict])
-            price_df = pd.concat([price_df, kline_df], ignore_index=True)
+
+        # Combine all kline data into a DataFrame
+        if kline_data_list:
+            kline_df = pd.DataFrame(kline_data_list)
+            if not kline_df.isna().all(axis=None):
+                price_df = pd.concat([price_df, kline_df], ignore_index=True)
+
         return price_df
 
 
